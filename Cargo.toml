@@ -1,0 +1,19 @@
+[package]
+name = "supergunzip"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tokio = { version = "1.21.2", features = ["full"] }
+clap = { version = "4.0.32", features = ["derive"] }
+async-compression = { version = "0.3.15", features = ["all"] }
+glob = "0.3.1"
+
+[dev-dependencies]
+tokio-test = "0.4.2"
+
+[profile.release]
+strip = true  # Automatically strip symbols from the binary.
+lto = true  # Enable link-time optimization.
