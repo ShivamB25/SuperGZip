@@ -31,10 +31,10 @@ super-gunzip <gzip | unzip> <glob pattern> [options]
 
 Where current options are:
 
-- `-n <number>` or `--num_threads <number>`: The number of threads to split the workload across. It is the responsibility of the user to ensure that the number provided is reasonable. **Defaults to 1.**
-- `-k` or `--keep_original`: If this tag is present, the program will not attempt to remove the original file.
 - `-h` or `--help`: If this tag is present, the program will print the help message and exit.
-
+- `-k` or `--keep_original`: If this tag is present, the program will not attempt to remove the original file.
+- `-n <number>` or `--num_threads <number>`: The number of threads to split the workload across. It is the responsibility of the user to ensure that the number provided is reasonable. **Defaults to 1.**
+- `-v` or `--verbose`: If this tag is present, the program will print the name of each file as it is processed.
 ---
 
 ## Examples <a name = "examples"></a>
@@ -50,6 +50,6 @@ super-gunzip gzip some/filepath/glob/pattern*
 super-gunzip unzip some/filepath/glob/pattern*.gz
 
 # Utilize multithreading
-super-gunzip gzip some/filepath/glob/pattern* --num_threads 12
-super-gunzip unzip some/filepath/glob/pattern*.gz --num_threads 12
+super-gunzip gzip some/filepath/glob/pattern* --num-threads 12
+super-gunzip unzip some/filepath/glob/pattern*.gz --num-threads 12
 ```

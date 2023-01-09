@@ -11,6 +11,7 @@ use tokio::io::{
     Error as TokioIOError, Result as TokioIOResult,
 };
 use tokio::sync::Semaphore;
+use tokio::task::JoinError as TokioJoinError;
 
 async fn is_file(path: &Path) -> bool {
     let metadata = async_metadata(path).await;
@@ -22,11 +23,6 @@ async fn is_file(path: &Path) -> bool {
 }
 
 async fn gzip(path: &Path, keep_original: bool) -> TokioIOResult<()> {
-    // Silently return if the path is not a file or already ends with .gz
-    if !is_file(path).await || path.to_string_lossy().ends_with(".gz") {
-        return Ok(());
-    }
-
     // Define the buffer for the compressed data, the reader, and the encoder
     let mut buffer = Vec::new();
     let reader = TokioBufReader::new(AsyncFile::open(path).await?);
@@ -52,11 +48,6 @@ async fn gzip(path: &Path, keep_original: bool) -> TokioIOResult<()> {
 }
 
 async fn unzip(path: &Path, keep_original: bool) -> TokioIOResult<()> {
-    // Silently return if the path is not a file or does not end with .gz
-    if !is_file(path).await || !path.to_string_lossy().ends_with(".gz") {
-        return Ok(());
-    }
-
     // Define the buffer for the decompressed data, the reader, and the decoder
     let mut buffer = Vec::new();
     let reader = TokioBufReader::new(AsyncFile::open(path).await?);
@@ -82,6 +73,7 @@ async fn unzip(path: &Path, keep_original: bool) -> TokioIOResult<()> {
     Ok(())
 }
 
+/// A simple utility for compressing and decompressing files using the Gzip algorithm in a multithreaded.
 #[derive(Parser, Debug)]
 #[command(name = "super-gunzip", author, about, version)]
 struct SuperGunzip {
@@ -105,6 +97,10 @@ enum Commands {
         /// The maximum number of threads to split the compression across (default: 1)
         #[arg(short, long)]
         num_threads: Option<usize>,
+
+        /// Whether to be verbose about the decompression process
+        #[arg(short, long, action = clap::ArgAction::SetTrue)]
+        verbose: bool,
     },
 
     /// Decompresses all files matching the given pattern using the Gzip algorithm.
@@ -121,80 +117,115 @@ enum Commands {
         /// The maximum number of threads to split the decompression across (default: 1)
         #[arg(short, long)]
         num_threads: Option<usize>,
+
+        /// Whether to be verbose about the decompression process
+        #[arg(short, long, action = clap::ArgAction::SetTrue)]
+        verbose: bool,
     },
 }
 
-#[tokio::main]
-async fn main() -> TokioIOResult<()> {
-    let mut errors = vec![];
-    let args = SuperGunzip::parse();
-    let start = Instant::now();
+#[derive(Debug)]
+enum SuperGzipError {
+    IO(TokioIOError),
+    Threading(TokioJoinError),
+}
 
+impl From<TokioIOError> for SuperGzipError {
+    fn from(src: TokioIOError) -> Self {
+        Self::IO(src)
+    }
+}
+
+impl From<TokioJoinError> for SuperGzipError {
+    fn from(src: TokioJoinError) -> Self {
+        Self::Threading(src)
+    }
+}
+
+async fn _wrapper(
+    b_zip: bool,
+    pattern: String,
+    keep_original: bool,
+    num_threads: Option<usize>,
+    verbose: bool,
+) -> Result<(), String> {
+    let start = Instant::now();
+    let mut errors: Vec<SuperGzipError> = vec![];
+    let _max_threads = num_threads.unwrap_or(1);
+    let semaphmore = Arc::new(Semaphore::new(_max_threads));
+    let paths = glob::glob(&pattern).unwrap();
+    let mut handles = Vec::new();
+    for path in paths.flatten() {
+        let resource_lock = Arc::clone(&semaphmore);
+        let handle = tokio::spawn(async move {
+            // Silently return if the path is not a file or already ends with .gz
+            if !is_file(&path).await || path.to_string_lossy().ends_with(".gz") {
+                return Ok(());
+            }
+            let _permit = resource_lock.acquire_owned().await.unwrap();
+            let result = if b_zip {
+                if verbose {
+                    println!("Compressing {}", path.to_string_lossy());
+                }
+                gzip(&path, keep_original).await
+            } else {
+                if verbose {
+                    println!("Deompressing {}", path.to_string_lossy());
+                }
+                unzip(&path, keep_original).await
+            };
+            drop(_permit);
+            result
+        });
+        handles.push(handle);
+    }
+    for handle in handles {
+        let join_result = handle.await;
+        match join_result {
+            Ok(gzip_result) => {
+                if let Err(gzip_error) = gzip_result {
+                    errors.push(gzip_error.into());
+                }
+            }
+            Err(join_error) => {
+                errors.push(join_error.into());
+            }
+        }
+    }
+    if verbose {
+        println!("Finished in {} seconds", start.elapsed().as_secs_f64());
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        println!("Finished with {} errors.", errors.len());
+        Err(errors
+            .into_iter()
+            .map(|e| format!("{:?}", e))
+            .collect::<Vec<String>>()
+            .join("\n"))
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<(), String> {
+    let args = SuperGunzip::parse();
     match args.commands {
         Commands::Gzip {
             pattern,
             keep_original,
             num_threads,
+            verbose,
         } => {
-            let _max_threads = num_threads.unwrap_or(1);
-            let semaphmore = Arc::new(Semaphore::new(_max_threads));
-            let paths = glob::glob(&pattern).unwrap();
-            let mut handles = Vec::new();
-            for path in paths.flatten() {
-                let resource_lock = Arc::clone(&semaphmore);
-                let handle = tokio::spawn(async move {
-                    let _permit = resource_lock.acquire_owned().await.unwrap();
-                    let result = gzip(&path, keep_original).await;
-                    drop(_permit);
-                    result
-                });
-                handles.push(handle);
-            }
-            for handle in handles {
-                let result = handle.await?;
-                if let Err(e) = result {
-                    println!("Error: {}", e);
-                    errors.push(e);
-                }
-            }
+            return _wrapper(true, pattern, keep_original, num_threads, verbose).await;
         }
         Commands::Unzip {
             pattern,
             keep_original,
             num_threads,
+            verbose,
         } => {
-            let _max_threads = num_threads.unwrap_or(1);
-            let semaphmore = Arc::new(Semaphore::new(_max_threads));
-            let paths = glob::glob(&pattern).unwrap();
-            let mut handles = Vec::new();
-            for path in paths.flatten() {
-                let resource_lock = Arc::clone(&semaphmore);
-                let handle = tokio::spawn(async move {
-                    let _permit = resource_lock.acquire_owned().await.unwrap();
-                    let result = unzip(&path, keep_original).await;
-                    drop(_permit);
-                    result
-                });
-                handles.push(handle);
-            }
-            for handle in handles {
-                let result = handle.await?;
-                if let Err(e) = result {
-                    println!("Error: {}", e);
-                    errors.push(e);
-                }
-            }
+            return _wrapper(false, pattern, keep_original, num_threads, verbose).await;
         }
-    }
-
-    println!("Elapsed time: {:?} ms", start.elapsed().as_millis());
-    if errors.is_empty() {
-        println!("Finished without errors.");
-        Ok(())
-    } else {
-        Err(TokioIOError::new(
-            tokio::io::ErrorKind::Other,
-            format!("{} errors occurred", errors.len()),
-        ))
     }
 }
