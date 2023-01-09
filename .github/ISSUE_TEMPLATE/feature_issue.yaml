@@ -1,0 +1,27 @@
+name: 💡 Feature Report
+description: File a feature issue
+title: "[Feature]: "
+labels: ["enhancement"]
+assignees:
+  - octocat
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this feature request!
+  - type: checkboxes
+    id: no-duplicate-issues
+    attributes:
+      label: Is there an existing issue for this?
+      description: Please search to see if an issue already exists for the feature you encountered.
+      options:
+        - label: I have searched the existing issues
+          required: true
+  - type: textarea
+    id: whats-the-new-idea
+    attributes:
+      label: What feature do you want to see?
+      description: If you have a suggestion for how to implement this feature, please share it here.
+      placeholder: What feature do you want to see?
+    validations:
+      required: true
