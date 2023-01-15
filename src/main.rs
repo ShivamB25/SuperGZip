@@ -73,9 +73,9 @@ async fn unzip(path: &Path, keep_original: bool) -> TokioIOResult<()> {
     Ok(())
 }
 
-/// A simple utility for compressing and decompressing files using the Gzip algorithm in a multithreaded.
+/// A simple utility for compressing and decompressing files using the Gzip algorithm in a multithreaded manner.
 #[derive(Parser, Debug)]
-#[command(name = "super-gunzip", author, about, version)]
+#[command(name = "super-gunzip", version)]
 struct SuperGunzip {
     #[command(subcommand)]
     commands: Commands,
@@ -153,16 +153,28 @@ async fn _wrapper(
     let mut errors: Vec<SuperGzipError> = vec![];
     let _max_threads = num_threads.unwrap_or(1);
     let semaphmore = Arc::new(Semaphore::new(_max_threads));
-    let paths = glob::glob(&pattern).unwrap();
+    let paths =
+        glob::glob(&pattern).expect("Invalid glob pattern provided. Please check your input.");
     let mut handles = Vec::new();
     for path in paths.flatten() {
         let resource_lock = Arc::clone(&semaphmore);
         let handle = tokio::spawn(async move {
-            // Silently return if the path is not a file or already ends with .gz
-            if !is_file(&path).await || path.to_string_lossy().ends_with(".gz") {
+            // Silently return if the path is not a file
+            if !is_file(&path).await {
                 return Ok(());
             }
-            let _permit = resource_lock.acquire_owned().await.unwrap();
+
+            // Silently return if the path extension doesn't fit the compression/decompression criteria
+            if (b_zip && path.extension() == Some("gz".as_ref()))
+                || (!b_zip && path.extension() != Some("gz".as_ref()))
+            {
+                if verbose {
+                    println!("Skipping {}", path.to_string_lossy());
+                }
+                return Ok(());
+            }
+
+            let _permit = resource_lock.acquire_owned().await.expect("Failed to acquire permit from semaphore. This is a bug in the program. Please report it.");
             let result = if b_zip {
                 if verbose {
                     println!("Compressing {}", path.to_string_lossy());

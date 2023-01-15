@@ -2,11 +2,17 @@
 name = "super-gunzip"
 version = "0.1.0"
 edition = "2021"
+authors = ["Maurice Pasternak"]
+license = "MIT"
+description = "A simple utility for compressing and decompressing files using the Gzip algorithm in a multithreaded manner"
+readme = "README.md"
+repository = "https://github.com/MauricePasternak/SuperGZip"
+categories = ["filesystem"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tokio = { version = "1.21.2", features = [
+tokio = { version = "1.24.1", features = [
     "rt",
     "rt-multi-thread",
     "io-util",
