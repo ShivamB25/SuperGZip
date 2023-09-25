@@ -128,6 +128,7 @@ enum Commands {
 enum SuperGzipError {
     IO(TokioIOError),
     Threading(TokioJoinError),
+    InvalidGzipHeader,
 }
 
 impl From<TokioIOError> for SuperGzipError {
@@ -148,7 +149,7 @@ async fn _wrapper(
     keep_original: bool,
     num_threads: Option<usize>,
     verbose: bool,
-) -> Result<(), String> {
+) -> Result<(), SuperGzipError> {
     let start = Instant::now();
     let mut errors: Vec<SuperGzipError> = vec![];
     let _max_threads = num_threads.unwrap_or(1);
@@ -186,7 +187,16 @@ async fn _wrapper(
                 if verbose {
                     println!("Deompressing {}", path.to_string_lossy());
                 }
-                unzip(&path, keep_original).await
+                match unzip(&path, keep_original).await {
+                    Ok(_) => Ok(()),
+                    Err(e) => {
+                        if e.kind() == std::io::ErrorKind::InvalidData {
+                            Err(SuperGzipError::InvalidGzipHeader)
+                        } else {
+                            Err(SuperGzipError::IO(e))
+                        }
+                    }
+                }
             };
             drop(_permit);
             result
@@ -213,16 +223,22 @@ async fn _wrapper(
         Ok(())
     } else {
         println!("Finished with {} errors.", errors.len());
-        Err(errors
-            .into_iter()
-            .map(|e| format!("{:?}", e))
-            .collect::<Vec<String>>()
-            .join("\n"))
+        for error in &errors {
+            match error {
+                SuperGzipError::InvalidGzipHeader => {
+                    println!("Error: Invalid gzip header");
+                }
+                _ => {
+                    println!("Error: {:?}", error);
+                }
+            }
+        }
+        Err(errors.into_iter().next().unwrap())
     }
 }
 
 #[tokio::main]
-async fn main() -> Result<(), String> {
+async fn main() -> Result<(), SuperGzipError> {
     let args = SuperGunzip::parse();
     match args.commands {
         Commands::Gzip {
