@@ -164,10 +164,12 @@ async fn _wrapper(
                 return Ok(());
             }
 
-            // Silently return if the path extension doesn't fit the compression/decompression criteria
-            if (b_zip && path.extension() == Some("gz".as_ref()))
-                || (!b_zip && path.extension() != Some("gz".as_ref()))
-            {
+            // Check if the file is a gzip compressed file
+            let is_gzip = path.extension().map_or(false, |ext| ext == "gz");
+
+            // Skip processing if the file is not a gzip compressed file and we're compressing
+            // or if the file is a gzip compressed file and we're decompressing
+            if (b_zip && !is_gzip) || (!b_zip && is_gzip) {
                 if verbose {
                     println!("Skipping {}", path.to_string_lossy());
                 }
